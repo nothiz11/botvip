@@ -71,7 +71,7 @@ ${'═'.repeat(50)}
 ${'═'.repeat(50)}
 `);
 
-client.login(config.token).catch(err => {
+client.login(process.env.TOKEN || config.token).catch(err => {
   console.error('❌ Erro ao fazer login:', err);
   process.exit(1);
 });
