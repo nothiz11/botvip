@@ -1,0 +1,7 @@
+node_modules/
+vip_system.db
+vip_system.db-wal
+vip_system.db-shm
+.env
+*.log
+.DS_Store
