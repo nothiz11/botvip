@@ -3,12 +3,38 @@
  * Adiciona VIP a um usuário (apenas staff autorizado)
  */
 
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const VipModel = require('../models/VipModel');
 const { isAuthorizedStaff } = require('../utils/permissions');
 const { createSuccessEmbed, createErrorEmbed, createVipAddedEmbed } = require('../utils/embeds');
 const { sendAndDelete } = require('../utils/messages');
 const config = require('../config.json');
+
+async function canAssignRole(guild, role) {
+  try {
+    const botMember = guild.members.me || await guild.members.fetch(guild.members.me?.id).catch(() => null);
+    if (!botMember) {
+      return { allowed: false, reason: 'não consegui verificar minhas permissões.' };
+    }
+
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+      return { allowed: false, reason: 'não tenho permissão para gerenciar cargos.' };
+    }
+
+    if (!role?.editable || role.managed) {
+      return { allowed: false, reason: 'o cargo selecionado não pode ser atribuído por mim.' };
+    }
+
+    if (botMember.roles.highest.position <= role.position) {
+      return { allowed: false, reason: 'o cargo selecionado está acima de mim na hierarquia.' };
+    }
+
+    return { allowed: true };
+  } catch (err) {
+    console.error('❌ Erro ao verificar permissão de cargo:', err);
+    return { allowed: false, reason: 'não consegui validar minha permissão para esse cargo.' };
+  }
+}
 
 module.exports = {
   name: 'addvip',
@@ -97,15 +123,36 @@ module.exports = {
         });
       }
       
-      // Adicionar cargo VIP
+      const vipRoleId = config.cargosVip[vipType];
+      const vipRole = guild.roles.cache.get(vipRoleId) || await guild.roles.fetch(vipRoleId).catch(() => null);
+
+      if (!vipRole) {
+        return await sendAndDelete(message, {
+          embeds: [createErrorEmbed(
+            'Cargo Não Encontrado',
+            'O cargo VIP configurado não foi encontrado no servidor.'
+          )]
+        });
+      }
+
+      const roleCheck = await canAssignRole(guild, vipRole);
+      if (!roleCheck.allowed) {
+        return await sendAndDelete(message, {
+          embeds: [createErrorEmbed(
+            'Erro ao Adicionar Cargo',
+            `Não consegui adicionar o cargo. ${roleCheck.reason}`
+          )]
+        });
+      }
+
       try {
-        await targetMember.roles.add(config.cargosVip[vipType]);
+        await targetMember.roles.add(vipRole);
       } catch (err) {
         console.error('❌ Erro ao adicionar cargo:', err);
         return await sendAndDelete(message, {
           embeds: [createErrorEmbed(
             'Erro ao Adicionar Cargo',
-            'Não consegui adicionar o cargo. Verifique minhas permissões.'
+            'Não consegui adicionar o cargo. Verifique a hierarquia de cargos e minhas permissões.'
           )]
         });
       }

@@ -3,7 +3,7 @@
  * Define um cargo extra para outro usuário (apenas VIPs autorizados)
  */
 
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const VipModel = require('../models/VipModel');
 const { canUseVipCommand, canSetBenefit, checkBenefitLimit } = require('../utils/permissions');
 const { createErrorEmbed, createSuccessEmbed, createBenefitAddedEmbed } = require('../utils/embeds');
@@ -18,6 +18,32 @@ const BENEFIT_ROLES = {
   'antban': 'antban',
   '/antban': 'antban'
 };
+
+async function canAssignRole(guild, role) {
+  try {
+    const botMember = guild.members.me || await guild.members.fetch(guild.members.me?.id).catch(() => null);
+    if (!botMember) {
+      return { allowed: false, reason: 'não consegui verificar minhas permissões.' };
+    }
+
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageRoles)) {
+      return { allowed: false, reason: 'não tenho permissão para gerenciar cargos.' };
+    }
+
+    if (!role?.editable || role.managed) {
+      return { allowed: false, reason: 'o cargo selecionado não pode ser atribuído por mim.' };
+    }
+
+    if (botMember.roles.highest.position <= role.position) {
+      return { allowed: false, reason: 'o cargo selecionado está acima de mim na hierarquia.' };
+    }
+
+    return { allowed: true };
+  } catch (err) {
+    console.error('❌ Erro ao verificar permissão de cargo:', err);
+    return { allowed: false, reason: 'não consegui validar minha permissão para esse cargo.' };
+  }
+}
 
 module.exports = {
   name: 'vipset',
@@ -62,31 +88,74 @@ module.exports = {
       }
       
       // Obter cargo mencionado
+      let mentionedRole = null;
       let benefitType = null;
       if (message.mentions.roles.size > 0) {
-        const role = message.mentions.roles.first();
+        mentionedRole = message.mentions.roles.first();
         
         // Verificar se é um cargo de benefício válido
-        for (const [benefit, roleId] of Object.entries(config.cargosBeneficios)) {
-          if (role.id === roleId) {
+        for (const [benefit, roleId] of Object.entries(config.cargosBeneficios || {})) {
+          if (mentionedRole.id === roleId) {
             benefitType = benefit;
             break;
           }
-        }
-        
-        if (!benefitType) {
-          return await sendAndDelete(message, {
-            embeds: [createErrorEmbed(
-              'Cargo Inválido',
-              'O cargo mencionado não é um cargo de benefício válido.'
-            )]
-          });
         }
       } else {
         return await sendAndDelete(message, {
           embeds: [createErrorEmbed(
             'Cargo Não Mencionado',
-            'Por favor, mencione um cargo de benefício (@cargo).'
+            'Por favor, mencione um cargo de benefício ou de acesso à call (@cargo).'
+          )]
+        });
+      }
+
+      const guild = message.guild;
+      let targetMember;
+      
+      try {
+        targetMember = await guild.members.fetch(targetUserId);
+      } catch (err) {
+        return await sendAndDelete(message, {
+          embeds: [createErrorEmbed(
+            'Usuário Não Encontrado',
+            'Não consegui encontrar o usuário no servidor.'
+          )]
+        });
+      }
+
+      if (!benefitType) {
+        const roleCheck = await canAssignRole(guild, mentionedRole);
+        if (!roleCheck.allowed) {
+          return await sendAndDelete(message, {
+            embeds: [createErrorEmbed(
+              'Erro ao Adicionar Cargo',
+              `Não consegui adicionar o cargo. ${roleCheck.reason}`
+            )]
+          });
+        }
+
+        try {
+          await targetMember.roles.add(mentionedRole);
+        } catch (err) {
+          console.error('❌ Erro ao adicionar cargo de call:', err);
+          return await sendAndDelete(message, {
+            embeds: [createErrorEmbed(
+              'Erro ao Adicionar Cargo',
+              'Não consegui adicionar o cargo. Verifique a hierarquia de cargos e minhas permissões.'
+            )]
+          });
+        }
+
+        await VipModel.addLog('call_role_granted', {
+          userId: message.author.id,
+          targetUserId,
+          action: `Cargo de call ${mentionedRole.name} concedido`
+        });
+
+        return await sendAndDelete(message, {
+          embeds: [createSuccessEmbed(
+            'Cargo Concedido',
+            `O cargo ${mentionedRole.name} foi adicionado ao usuário.`
           )]
         });
       }
@@ -124,20 +193,6 @@ module.exports = {
       }
       
       // ====== ADICIONAR BENEFÍCIO ======
-      
-      const guild = message.guild;
-      let targetMember;
-      
-      try {
-        targetMember = await guild.members.fetch(targetUserId);
-      } catch (err) {
-        return await sendAndDelete(message, {
-          embeds: [createErrorEmbed(
-            'Usuário Não Encontrado',
-            'Não consegui encontrar o usuário no servidor.'
-          )]
-        });
-      }
       
       // Adicionar cargo de benefício
       try {

@@ -21,6 +21,10 @@ module.exports = {
       // Extrair comando e argumentos
       const args = message.content.slice(config.prefix.length).trim().split(/ +/);
       const commandName = args.shift().toLowerCase();
+
+      if (commandName === 'paineladmin') {
+        return;
+      }
       
       // Buscar arquivo do comando
       const commandPath = path.join(__dirname, '..', 'commands', `${commandName}.js`);

@@ -19,28 +19,41 @@ const db = new sqlite3.Database(dbPath, (err) => {
 });
 
 /**
+ * Garantir que uma coluna exista em uma tabela
+ */
+async function ensureColumn(tableName, columnName, definition) {
+  try {
+    const existing = await allAsync(`PRAGMA table_info(${tableName})`);
+    if (!existing.some(col => col.name === columnName)) {
+      await runAsync(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`);
+    }
+  } catch (err) {
+    console.error(`❌ Erro ao verificar coluna ${tableName}.${columnName}:`, err);
+  }
+}
+
+/**
  * Inicializar tabelas do banco de dados
  * Cria as tabelas se não existirem
  */
-function initializeTables() {
-  db.serialize(() => {
-    // Tabela de VIPs
-    db.run(`
+async function initializeTables() {
+  try {
+    await runAsync(`
       CREATE TABLE IF NOT EXISTS vips (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         userId TEXT UNIQUE NOT NULL,
         vipType TEXT NOT NULL,
         startDate DATETIME DEFAULT CURRENT_TIMESTAMP,
         expirationDate DATETIME NOT NULL,
-        active INTEGER DEFAULT 1
+        active INTEGER DEFAULT 1,
+        renewals INTEGER DEFAULT 0,
+        lastRenewalDate DATETIME,
+        lastReminderDays TEXT
       )
-    `, (err) => {
-      if (err) console.error('❌ Erro ao criar tabela vips:', err);
-      else console.log('✅ Tabela vips inicializada');
-    });
+    `);
+    console.log('✅ Tabela vips inicializada');
 
-    // Tabela de benefícios
-    db.run(`
+    await runAsync(`
       CREATE TABLE IF NOT EXISTS vip_benefits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         benefitId TEXT UNIQUE NOT NULL,
@@ -50,13 +63,10 @@ function initializeTables() {
         grantedDate DATETIME DEFAULT CURRENT_TIMESTAMP,
         active INTEGER DEFAULT 1
       )
-    `, (err) => {
-      if (err) console.error('❌ Erro ao criar tabela vip_benefits:', err);
-      else console.log('✅ Tabela vip_benefits inicializada');
-    });
+    `);
+    console.log('✅ Tabela vip_benefits inicializada');
 
-    // Tabela de logs
-    db.run(`
+    await runAsync(`
       CREATE TABLE IF NOT EXISTS logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         logType TEXT NOT NULL,
@@ -68,11 +78,79 @@ function initializeTables() {
         timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
         details TEXT
       )
-    `, (err) => {
-      if (err) console.error('❌ Erro ao criar tabela logs:', err);
-      else console.log('✅ Tabela logs inicializada');
-    });
-  });
+    `);
+    console.log('✅ Tabela logs inicializada');
+
+    await runAsync(`
+      CREATE TABLE IF NOT EXISTS calls (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ownerId TEXT NOT NULL,
+        guildId TEXT NOT NULL,
+        channelId TEXT,
+        roleId TEXT,
+        name TEXT DEFAULT 'Minha Call',
+        emoji TEXT DEFAULT '🎧',
+        limitNumber INTEGER DEFAULT 5,
+        privacy TEXT DEFAULT 'public',
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updatedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        backup TEXT,
+        active INTEGER DEFAULT 1,
+        roleColor TEXT DEFAULT '5865f2',
+        roleHoist INTEGER DEFAULT 0,
+        roleMentionable INTEGER DEFAULT 0,
+        nameChanges INTEGER DEFAULT 0,
+        emojiChanges INTEGER DEFAULT 0,
+        roleRecreations INTEGER DEFAULT 0,
+        totalGuestsAdded INTEGER DEFAULT 0,
+        totalGuestsRemoved INTEGER DEFAULT 0,
+        guestCount INTEGER DEFAULT 0,
+        deletedAt DATETIME
+      )
+    `);
+    console.log('✅ Tabela calls inicializada');
+
+    await runAsync(`
+      CREATE TABLE IF NOT EXISTS call_guests (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        callId INTEGER NOT NULL,
+        userId TEXT NOT NULL,
+        addedBy TEXT,
+        addedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+        removedAt DATETIME,
+        active INTEGER DEFAULT 1
+      )
+    `);
+    console.log('✅ Tabela call_guests inicializada');
+
+    await runAsync(`
+      CREATE TABLE IF NOT EXISTS call_backups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ownerId TEXT NOT NULL,
+        guildId TEXT NOT NULL,
+        data TEXT NOT NULL,
+        createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    console.log('✅ Tabela call_backups inicializada');
+
+    await ensureColumn('vips', 'renewals', 'INTEGER DEFAULT 0');
+    await ensureColumn('vips', 'lastRenewalDate', 'DATETIME');
+    await ensureColumn('vips', 'lastReminderDays', 'TEXT');
+    await ensureColumn('calls', 'limitNumber', 'INTEGER DEFAULT 5');
+    await ensureColumn('calls', 'roleColor', 'TEXT DEFAULT "5865f2"');
+    await ensureColumn('calls', 'roleHoist', 'INTEGER DEFAULT 0');
+    await ensureColumn('calls', 'roleMentionable', 'INTEGER DEFAULT 0');
+    await ensureColumn('calls', 'nameChanges', 'INTEGER DEFAULT 0');
+    await ensureColumn('calls', 'emojiChanges', 'INTEGER DEFAULT 0');
+    await ensureColumn('calls', 'roleRecreations', 'INTEGER DEFAULT 0');
+    await ensureColumn('calls', 'totalGuestsAdded', 'INTEGER DEFAULT 0');
+    await ensureColumn('calls', 'totalGuestsRemoved', 'INTEGER DEFAULT 0');
+    await ensureColumn('calls', 'guestCount', 'INTEGER DEFAULT 0');
+    await ensureColumn('calls', 'deletedAt', 'DATETIME');
+  } catch (err) {
+    console.error('❌ Erro ao inicializar tabelas:', err);
+  }
 }
 
 /**
